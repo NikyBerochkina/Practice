@@ -50,7 +50,7 @@ int main(int argc, char** argv)
                 input = optarg;
                 break;
             case 'o':
-                input = optarg;
+                output = optarg;
                 break;
             case '?':
             default:
@@ -128,7 +128,7 @@ int readw(char **w, char *sign, FILE *f_in)
     {
         ungetc(c, f_in);
     }
-    while (( c = fgetc(f_in)) != EOF && c != ' ' && c != '\n' && c != '\t')
+    while (( c = fgetc(f_in)) != EOF && !isspace(c))
     {
         if (strchr(signs, c) == NULL)
         {
