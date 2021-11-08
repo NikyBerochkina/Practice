@@ -121,14 +121,14 @@ int readw(char **w, char *sign, FILE *f_in)
     const char *signs = ".,!&'’?()-<>*\\=[]+-%/:;{}#\"";
     int memory = 2, i = 0, c = 0, in = 0;
     *w = (char *)malloc(sizeof(char) * memory);
-    while (( c = fgetc(f_in)) != EOF && (c == ' ' || c == '\n' || c == '\t'))
+    while (( c = fgetc(f_in)) != EOF && isspace(c))
     {
     }
     if (c != EOF)
     {
         ungetc(c, f_in);
     }
-    while (( c = fgetc(f_in)) != EOF && !isspace(c))
+    while (( c = fgetc(f_in)) != EOF && c != ' ' && c != '\n' && c != '\t')
     {
         if (strchr(signs, c) == NULL)
         {
