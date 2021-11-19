@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <assert.h>
 
 struct StringArray
 {
@@ -42,79 +43,92 @@ struct StringArray* createstringarray()
     return result;
 }
 
-
-// чтение слова из строки
-const char* readword(const char* p, const char* end, char** word)
+const char* skip_spaces(const char* p, const char* end)
 {
     while (p != end && isspace(*p))
     {
         p++;
     }
-    if (p == end) //если конец файла
-    {
-        *word = NULL;
-        return p;
-    }
+    return p;
+}
 
-    char * f = 0;
-    if (*p == '"')// если найдена открывающаяся кавычка,то ищем вторую, и формируем слово
+const char* read_symbols(const char* p, const char* end, char** word)
+{
+    const char *doubsigns = "&|>";
+    size_t len = 1;
+    // если найден спец знак, то проверяем следующий знак и формируем слово
+    if (p + 1 != end && *p == *(p + 1) && strchr(doubsigns, *p) != NULL)
     {
-        if ((f = strchr(p+1, '"')) == NULL)
-        {
-            p = NULL;
-            return p;
-        }
-        size_t len = (f - 1) - (p + 1) + 1;
-        *word = (char*)malloc((len + 1) * sizeof(char));
-        memcpy(*word, p + 1, len * sizeof(char));
-        (*word)[len] = '\0';
-        return f+1;
+        len = 2;
+    }
+    *word = (char*)malloc((len + 1) * sizeof(char));
+    memcpy(*word, p, len * sizeof(char));
+    (*word)[len] = '\0';
+    return p + len;
+}
+
+void append_to_word(const char* p, size_t len, char** word, size_t* full_len)
+{
+    *word = (char*)realloc(*word, (*full_len + len + 1) * sizeof(char));
+    memcpy(*word + *full_len, p, len);
+    *full_len += len;
+    (*word)[*full_len] = '\0';
+}
+
+// чтение слова из строки
+const char* readword(const char* start, const char* end, char** word)
+{
+    *word = NULL;
+    if ((start = skip_spaces(start, end)) == end)
+    {
+        return end;
     }
 
     const char *signs = "&|>;<()";
-    const char *doubsigns = "&|>";
-    if (strchr(signs, *p) != NULL)// если найден спец знак, то проверяем следующий знак и формируем слово
+    if (strchr(signs, *start) != NULL)
     {
-        ssize_t len = 2;
-        if (strchr(doubsigns, *p) != NULL && *(p + 1) != EOF && p == p + 1)
-        {
-            len = 3;
-        }
-        *word = (char*)malloc(len * sizeof(char));
-        memcpy(*word, p, (len - 1) * sizeof(char));
-        (*word)[len] = '\0';
-        return p + len - 1;
+        return read_symbols(start, end, word);
     }
 
-    // ПРОВЕРИТЬ КАК РАБОТАЕТ ЭТА ЧАСТЬ КОДА!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
-
-    const char* now = p + 1;
-    size_t len = 0;
-    *word = (char*)malloc(2 * sizeof(char));
-    while (now < end && !isspace(*now)) // не конец строки или файла, не табуляция, не пробел (если кавычка, но без пробела впереди или позади, то это все еще то же слово)
+    const char* now = start;
+    size_t full_len = 0;
+    do
     {
-        if (*now != '"')
+        while (now != end && strchr(" \t\"&|>;<()", *now) == NULL)
         {
-            len ++;
-        }
-        else
-        {
-            *word = (char*)realloc(*word, (len + 1) * sizeof(char));
-            memcpy(*word, p + 1, len * sizeof(char));
-            p = now + 1;
-            len = 0;
+            now++;
         }
 
-        now++;
-    }
-    *word = (char*)realloc(*word, (len + 1) * sizeof(char));
-    (*word)[len] = '\0';
-    return now + 1;
+        append_to_word(start, now - start, word, &full_len);
+        if (now == end || *now != '"')
+        {
+            return now;
+        }
+        assert(now < end && *now == '"');
+        
+        start = now + 1;
+        now = strchr(start, '"');
+        if (now == NULL)
+        {
+            if (*word)
+            {
+                free(*word);
+                *word = NULL;
+            }
+            return end;
+        }
 
+        append_to_word(start, now - start, word, &full_len);
+        start = now + 1;
+        now = start;
+    } while (1);
+
+    assert(0);
+    return NULL;
 }
 
 // допустим добавление слова в массив
-int addstrtostringarray(struct StringArray* p, char **word)
+int addstrtostringarray(struct StringArray* p, char *word)
 {
     if (!p || !word)
     {
@@ -131,7 +145,7 @@ int addstrtostringarray(struct StringArray* p, char **word)
         p->array = temp;
         p->capacity = capacity;
     }
-    const char* copy = strdup(*word);
+    const char* copy = strdup(word);
     if (!copy)
     {
         return 0;
@@ -144,9 +158,10 @@ int addstrtostringarray(struct StringArray* p, char **word)
 //вывод слов 
 void writestringarray(struct StringArray* words)
 {
+    printf("write array: %p\n", words);
     for (int i = 0; i < words->size; i++)
     {
-        printf("%s\n", words->array[i]);
+        printf("%2d: %s\n", i + 1, words->array[i]);
     }
 }
 
@@ -161,6 +176,7 @@ void destroystringarray(struct StringArray* words)
     {
         free((char *)words->array[i]);
     }
+    free(words->array);
     free(words);
 }
 
@@ -168,16 +184,20 @@ void destroystringarray(struct StringArray* words)
 enum ReadStatus readline(FILE* f_in, struct StringArray** array)
 {
     char* line = NULL;
-    size_t size = 0;
-    if (getline(&line, &size, f_in) < 0)
+    size_t unused = 0;
+    ssize_t size = 0; 
+    if ((size = getline(&line, &unused, f_in)) < 0)
     {
+        free(line);
         return RS_EOF;
     }
 
-    //*words = createstringarray(); 
-    const char* p = line;
-    const char* end = line + size; 
     *array = createstringarray();
+
+    const char* p = line;
+    const char* end = line[size - 1] == '\n'
+        ? line + size - 1
+        : line + size;
     do
     { //считываем слова и создаем массив слов
         char* word = NULL;
@@ -185,18 +205,12 @@ enum ReadStatus readline(FILE* f_in, struct StringArray** array)
         p = readword(p, end, &word);
         if (word)
         {
-            addstrtostringarray(*array, &word);
+            addstrtostringarray(*array, word);
             free(word);
         }
-    } while (p != end && p != NULL);
+    } while (p != end);
 
-    if (p == NULL)
-    {
-        destroystringarray(*array);
-        array = NULL;
-        return RS_ERROR;
-    }
-    
+    free(line);
     return RS_OK;
 }
 
