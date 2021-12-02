@@ -25,11 +25,6 @@ enum ReadStatus
     RS_EOF
 };
 
-// struct Token
-// {
-//     char* word;
-// };
-
 struct StringArray* createstringarray()
 {
     struct StringArray* result = (struct StringArray*)malloc(sizeof(struct StringArray));
@@ -73,7 +68,6 @@ const char* read_symbols(const char* p, const char* end, char** word)
     return p + len;
 }
 
-// 
 void append_to_word(const char* p, size_t len, char** word, size_t* full_len)
 {
     *word = (char*)realloc(*word, (*full_len + len + 1) * sizeof(char));
@@ -228,7 +222,6 @@ enum ReadStatus readline(FILE* f_in, struct StringArray** array)
 enum TokenType
 {
     tNoToken,
-    // tCommonWord,
     tOpeningBracket, // (
     tClosingBracket, // )
     tVerticalLine, // | (did it)
@@ -308,7 +301,6 @@ int command_execution(struct StringArray* words)
 
         if (fd_buf >= 0 && type == tLeftAngle)
         {
-            // TODO: handle error
         }
         
         fd_in = fd_buf < 0 ? STDIN_FILENO : fd_buf;
@@ -327,13 +319,12 @@ int command_execution(struct StringArray* words)
                 else 
                 {
                     int fds[2];
-                    // TODO: handle error (pipe failed)
                     if (!pipe(fds))
                     {
                         fd_out = fds[1];
                         fd_buf = fds[0];
                     }
-                    else // это вооюще надо? Лина этого не делала
+                    else 
                     {
                         PRINT_ERROR("pipe failed");
                         failCommand = 1;
@@ -343,7 +334,6 @@ int command_execution(struct StringArray* words)
             }
             case tRightAngle: // write to file
             {
-                // TODO: handle error (there's no end+1 or open failed)
                 if (words->array[end + 1] == NULL)
                 {
                     PRINT_ERROR("filename expected");
@@ -352,23 +342,22 @@ int command_execution(struct StringArray* words)
                 }
                 else
                 {
-                    int fd = open(words->array[end + 1], O_WRONLY | O_CREAT | O_TRUNC, 0666); // разве нужно тогда создавать файл?
+                    int fd = open(words->array[end + 1], O_WRONLY | O_CREAT | O_TRUNC, 0666); 
                     if (fd != -1)
                     {
                         fd_out = fd;
                     }
                     else 
                     {
-                        PRINT_ERROR("open failed"); // вроде должно работать)))
+                        PRINT_ERROR("open failed"); 
                         failCommand = 1;
                     }
-                    // TODO: clarify using end position
+                    
                     end++;
                 }
                 break;
             }
             
-            // TODO: so do for the left angle
             case tLeftAngle: // read from file
             {
                 if (words->array[end + 1] == NULL)
@@ -386,7 +375,7 @@ int command_execution(struct StringArray* words)
                     }
                     else 
                     {
-                        PRINT_ERROR("open failed"); // вроде должно работать)))
+                        PRINT_ERROR("open failed"); 
                         failCommand = 1;
                     }
                 
@@ -405,17 +394,16 @@ int command_execution(struct StringArray* words)
                 }
                 else
                 {
-                    int fd = open(words->array[end + 1], O_WRONLY | O_CREAT | O_APPEND, 0666); // разве нужно тогда создавать файл?
+                    int fd = open(words->array[end + 1], O_WRONLY | O_CREAT | O_APPEND, 0666); 
                     if (fd != -1)
                     {
                         fd_out = fd;
                     }
                     else 
                     {
-                        PRINT_ERROR("open failed"); // вроде должно работать)))
+                        PRINT_ERROR("open failed");
                         failCommand = 1;
                     }
-                    // TODO: clarify using end position
                     end++;
                 }
                 break;
@@ -438,7 +426,7 @@ int command_execution(struct StringArray* words)
                     {
                         dup2(fd_in, STDIN_FILENO);
                         close(fd_in);
-                        // TODO: gracfully close descriptors everywhere (open or pipe)
+                        
                     }
                     if (fd_out != STDOUT_FILENO)
                     {
