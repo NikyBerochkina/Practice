@@ -8,6 +8,10 @@
 #include <limits.h>
 #include <fcntl.h>
 
+#define MAX_PROC  10
+int pids[MAX_PROC];
+size_t pidsCount = 0;
+
 #define PRINT_ERROR(fmt, ...) \
     fprintf(stderr, "%s:%d " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__)
 
@@ -224,248 +228,298 @@ enum TokenType
     tNoToken,
     tOpeningBracket, // (
     tClosingBracket, // )
-    tVerticalLine, // | (did it)
-    tSemicolon, // ; (did it)
+    tVerticalLine, // | 
+    tSemicolon, // ; 
     tAmpersand, // &
-    tLeftAngle, // < (did it)
-    tRightAngle, // > (did it)
-    tDoubleRightAngle, // >> (did it)
+    tLeftAngle, // < 
+    tRightAngle, // > 
+    tDoubleRightAngle, // >> 
     tDoubleAmpersand, // &&
     tDoubleVerticalLine // ||
 };
 
-void command_end(struct StringArray* words, size_t start, size_t* end, enum TokenType* type)
+int perform_redirection(struct StringArray* words, size_t start, size_t* end,
+                         int* fd_in, int* fd_out, int* fd_buf, enum TokenType* type)
 {
     *type = tNoToken;
+    *fd_in = *fd_out = -1;
+    if (*fd_buf >= 0)
+    {
+        *fd_in = *fd_buf;
+        *fd_buf = -1;
+    }
+
     *end = start;
+    int plain = 1;
     while (*end < words->size)
     {
+        plain = 0;
         if (!strcmp(words->array[*end], ";"))
         {
             *type = tSemicolon;
-            return;
+            break;
         }
-        if (!strcmp(words->array[*end], "|"))
-        {
-            *type = tVerticalLine;
-            return;
-        }
-        if (!strcmp(words->array[*end], "<"))
-        {
-            *type = tLeftAngle;
-            return;
-        }
-        if (!strcmp(words->array[*end], ">"))
-        {
-            *type = tRightAngle;
-            return;
-        }
-        if (!strcmp(words->array[*end], ">>"))
-        {
-            *type = tDoubleRightAngle;
-            return;
+        if (!strcmp(words->array[*end], "&"))
+        {   
+            *type = tAmpersand;
+            break;
         }
         if (!strcmp(words->array[*end], "||"))
         {
             *type = tDoubleVerticalLine;
-            return;
+            break;
         }
         if (!strcmp(words->array[*end], "&&"))
         {
             *type = tDoubleAmpersand;
-            return;
+            break;
         }
+        if (!strcmp(words->array[*end], "|"))
+        {
+            if (*fd_out != -1)
+            {
+                PRINT_ERROR("double override output");
+                return 0;
+            }
+            int fds[2];
+            if (!pipe(fds))
+            {
+                *fd_out = fds[1];
+                *fd_buf = fds[0];
+            }
+            else 
+            {
+                PRINT_ERROR("pipe failed");
+                return 0;
+            }
+            *type = tVerticalLine;
+            break;
+        }
+        if (!strcmp(words->array[*end], "<"))
+        {
+            if (*end + 1 >= words->size || words->array[*end + 1] == NULL)
+            {
+                PRINT_ERROR("filename expected");
+                return 0;
+            }
+            if (*fd_in != -1)
+            {
+                PRINT_ERROR("double override output");
+                return 0;
+            }
+            int fd = open(words->array[*end + 1], O_RDONLY, 0666); 
+            if (fd < 0) 
+            {
+                PRINT_ERROR("open failed");
+                return 0;
+            }
+            *fd_in = fd;
+            // no break;
+        }
+        else if (!strcmp(words->array[*end], ">"))
+        {
+            if (*end + 1 >= words->size || words->array[*end + 1] == NULL)
+            {
+                PRINT_ERROR("filename expected");
+                return 0;
+            }
+            if (*fd_out != -1)
+            {
+                PRINT_ERROR("double override output");
+                return 0;
+            }
+            int fd = open(words->array[*end + 1], O_WRONLY | O_CREAT | O_TRUNC, 0666); 
+            if (fd < 0) 
+            {
+                PRINT_ERROR("open failed");
+                return 0;
+            }
+            *fd_out = fd;
+            // no break;
+        }
+        else if (!strcmp(words->array[*end], ">>"))
+        {
+            if (*end + 1 >= words->size || words->array[*end + 1] == NULL)
+            {
+                PRINT_ERROR("filename expected");
+                return 0;
+            }
+            if (*fd_out != -1)
+            {
+                PRINT_ERROR("double override output");
+                return 0;
+            }
+            int fd = open(words->array[*end + 1], O_WRONLY | O_CREAT | O_APPEND, 0666); 
+            if (fd < 0) 
+            {
+                PRINT_ERROR("open failed");
+                return 0;
+            }
+            *fd_out = fd;
+            // no break;
+        }
+        else
+        {
+            plain = 1;
+        }
+
+        if (!plain)
+        {
+            free(words->array[*end]);
+            words->array[*end] = NULL;
+            // avoid double free at exit
+            plain = 1;
+        }
+
         (*end)++;
     }
+    if (!plain)
+    {
+        free(words->array[*end]);
+        words->array[*end] = NULL;
+        (*end)++;
+    }
+    if (*fd_in == -1)
+    {
+        *fd_in = STDIN_FILENO;
+    }
+    if (*fd_out == -1)
+    {
+        *fd_out = STDOUT_FILENO;
+    }
+
+    return 1;
+}
+
+int change_directory(const struct StringArray* words, size_t start)
+{
+    const char *path = NULL;
+    if (start >= words->size || words->array[start + 1] == NULL)
+    {
+        path = getenv("HOME");
+        if (path == NULL)
+        {
+            PRINT_ERROR("no HOME environment variable");
+            return 0;
+        }
+    }
+    else 
+    {
+        path = words->array[start + 1];
+    }
+    if(chdir(path) < 0)
+    {
+        perror(path);
+        return 0;
+    }
+
+    char newdir[PATH_MAX];
+    getcwd(newdir, PATH_MAX);
+    printf("pwd: %s\n", newdir);
+    return 1;
+}
+
+int child_exec(const struct StringArray* words, size_t start, int fd_in, int fd_out, int fd_buf)
+{
+    if (fd_in != STDIN_FILENO)
+    {
+        dup2(fd_in, STDIN_FILENO);
+        close(fd_in);
+    }
+    if (fd_out != STDOUT_FILENO)
+    {
+        dup2(fd_out, STDOUT_FILENO);
+        close(fd_out);
+    }
+    if (fd_buf >= 0)
+    {
+        close(fd_buf);
+    }
+    execvp(words->array[start], (char* const*)(words->array + start));
+    PRINT_ERROR("execvp failed");
+    return 1;
+}
+
+int parent_cleanup(int pid, int background, int fd_in, int fd_out)
+{
+    if (fd_in != STDIN_FILENO)
+    {
+        close(fd_in);
+    }
+    if (fd_out != STDOUT_FILENO)
+    {
+        close(fd_out);
+    }
+    if (pid == -1)
+    {
+        return 1;
+    }
+
+    if (!background || pidsCount == MAX_PROC)
+    {
+        if (background)
+        {
+            PRINT_ERROR("it's impossible to do background mode");
+        }
+        int status;
+        waitpid(pid, &status, 0);
+    }
+    else
+    {
+        for (size_t i = 0; i < MAX_PROC; i++)
+        {
+            if (pids[i] < 0)
+            {
+                pids[i] = pid;
+                pidsCount++;
+                break;
+            }
+        }
+    }
+
+    return 1;
 }
 
 int command_execution(struct StringArray* words)
 {
-    const char *path;
-    char newdir[PATH_MAX];
-    getcwd(newdir, sizeof(newdir));
-    size_t start = 0;
-    size_t failCommand = 0; // хендлим ошибки открытия файла на чтение/запись и все такое
+    size_t start = 0;       // start of curr command
+    size_t end = 0;         // end of curr command
     
     int fd_in, fd_out, fd_buf = -1;
-    size_t end = 0;
     while (end != words->size)
     {
         enum TokenType type = tNoToken;
-        command_end(words, start, &end, &type);
-        if (end != words->size)
+        if (!perform_redirection(words, start, &end, &fd_in, &fd_out, &fd_buf, &type))
         {
-            free(words->array[end]);
-            words->array[end] = NULL;
+            PRINT_ERROR("refuse the whole line");
+            return 0;
+        }
+        if (words->array[start] == NULL)
+        {
+            PRINT_ERROR("refuse the whole line");
+            return 0;
         }
 
-        if (fd_buf >= 0 && type == tLeftAngle)
+        int background = type == tAmpersand;
+        if (!strcmp(words->array[start], "cd"))
         {
+            parent_cleanup(-1, 0, fd_in, fd_out);
+            change_directory(words, start);
         }
-        
-        fd_in = fd_buf < 0 ? STDIN_FILENO : fd_buf;
-        fd_out = STDOUT_FILENO;
-        fd_buf = -1;
-
-        switch (type)
+        else
         {
-            case tVerticalLine:
+            int pid;
+            if ((pid = fork()) == 0)
             {
-                if (*(words->array[end + 1]) == '|')
-                {
-                    PRINT_ERROR("command expected but have the second pipe");
-                    failCommand = 1;
-                }
-                else 
-                {
-                    int fds[2];
-                    if (!pipe(fds))
-                    {
-                        fd_out = fds[1];
-                        fd_buf = fds[0];
-                    }
-                    else 
-                    {
-                        PRINT_ERROR("pipe failed");
-                        failCommand = 1;
-                    }
-                }
-                break;
+                child_exec(words, start, fd_in, fd_out, fd_buf);
             }
-            case tRightAngle: // write to file
+            else if (pid > 0)
             {
-                if (words->array[end + 1] == NULL)
-                {
-                    PRINT_ERROR("filename expected");
-                    failCommand = 1;
-                    break;
-                }
-                else
-                {
-                    int fd = open(words->array[end + 1], O_WRONLY | O_CREAT | O_TRUNC, 0666); 
-                    if (fd != -1)
-                    {
-                        fd_out = fd;
-                    }
-                    else 
-                    {
-                        PRINT_ERROR("open failed"); 
-                        failCommand = 1;
-                    }
-                    
-                    end++;
-                }
-                break;
+                parent_cleanup(pid, background, fd_in, fd_out);
             }
-            
-            case tLeftAngle: // read from file
+            else
             {
-                if (words->array[end + 1] == NULL)
-                {
-                    PRINT_ERROR("filename expected");
-                    failCommand = 1;
-                    break;
-                }
-                else
-                {
-                    int fd = open(words->array[end + 1], O_RDONLY | O_TRUNC, 0666); 
-                    if (fd != -1) 
-                    {
-                        fd_in = fd;
-                    }
-                    else 
-                    {
-                        PRINT_ERROR("open failed"); 
-                        failCommand = 1;
-                    }
-                
-                }
-                end++;
-                break;
-            }
-            
-            case tDoubleRightAngle: // write to the end of the file
-            {
-                if (words->array[end + 1] == NULL)
-                {
-                    PRINT_ERROR("filename expected");
-                    failCommand = 1;
-                    break;
-                }
-                else
-                {
-                    int fd = open(words->array[end + 1], O_WRONLY | O_CREAT | O_APPEND, 0666); 
-                    if (fd != -1)
-                    {
-                        fd_out = fd;
-                    }
-                    else 
-                    {
-                        PRINT_ERROR("open failed");
-                        failCommand = 1;
-                    }
-                    end++;
-                }
-                break;
-            }
-        
-            default:
-                break;
-        }
-
-
-        if (words->array[start] && !failCommand)
-        {
-            if (strcmp(words->array[start], "cd"))
-            {
-
-                int pid;
-                if ((pid = fork()) == 0)
-                {
-                    if (fd_in != STDIN_FILENO)
-                    {
-                        dup2(fd_in, STDIN_FILENO);
-                        close(fd_in);
-                        
-                    }
-                    if (fd_out != STDOUT_FILENO)
-                    {
-                        dup2(fd_out, STDOUT_FILENO);
-                        close(fd_out);
-                    }
-                    execvp(words->array[start], (char* const*)(words->array + start));
-                    PRINT_ERROR("error");
-                    return 1;
-                }
-                int s;
-                wait(&s);
-                if (pid == 1)
-                {
-                    PRINT_ERROR("error");
-                    return 1;
-                }
-            }
-            else 
-            {
-                if (words->array[start + 1] == NULL)
-                {
-                    path = getenv("HOME");
-                    if (path == NULL)
-                    {
-                        PRINT_ERROR("no HOME environment variable");
-                        return 1;
-                    }
-                }
-                else 
-                {
-                    path = (char*)words->array[start + 1];
-                }
-                if(chdir(path) < 0)
-                {
-                    perror(path);
-                }
-                getcwd(newdir, PATH_MAX);
-                printf("pwd: %s\n", newdir);
+                PRINT_ERROR("fork failed");
             }
         }
         start = end + 1;
@@ -484,8 +538,27 @@ int main(int argc, char **argv)
 
     struct StringArray* array = NULL;
     enum ReadStatus status = RS_OK;
+    for (int i = 1; i < MAX_PROC; i++)
+    {
+        pids[i] = -1;
+    }
     while ((status = readline(f_in, &array)) != RS_EOF)
     {
+        for (int i = 1; i < MAX_PROC; i++)
+        {
+            if (pids[i] < 0 )
+            {
+                continue;
+            }
+
+            int backgroundStatus;
+            if (waitpid(pids[i], &backgroundStatus, WNOHANG))
+            {
+                printf("exited with pid - %d, status - %d\n", pids[i], WEXITSTATUS(backgroundStatus));
+                pids[i] = -1;
+                pidsCount--;
+            }
+        }
         if (status == RS_ERROR)
         {
             PRINT_ERROR("error");

@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/shell3",
-            "args": ["test_1.sh"],
+            "args": ["test_2.sh"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
