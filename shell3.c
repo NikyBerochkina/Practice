@@ -538,13 +538,13 @@ int main(int argc, char **argv)
 
     struct StringArray* array = NULL;
     enum ReadStatus status = RS_OK;
-    for (int i = 1; i < MAX_PROC; i++)
+    for (size_t i = 0; i < MAX_PROC; i++)
     {
         pids[i] = -1;
     }
     while ((status = readline(f_in, &array)) != RS_EOF)
     {
-        for (int i = 1; i < MAX_PROC; i++)
+        for (size_t i = 0; i < MAX_PROC; i++)
         {
             if (pids[i] < 0 )
             {
