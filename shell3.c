@@ -491,12 +491,12 @@ int command_execution(struct StringArray* words)
         enum TokenType type = tNoToken;
         if (!perform_redirection(words, start, &end, &fd_in, &fd_out, &fd_buf, &type))
         {
-            PRINT_ERROR("refuse the whole line");
+            PRINT_ERROR("redirection error: refuse the whole line");
             return 0;
         }
         if (words->array[start] == NULL)
         {
-            PRINT_ERROR("refuse the whole line");
+            PRINT_ERROR("command expected: refuse the whole line");
             return 0;
         }
 
@@ -522,7 +522,7 @@ int command_execution(struct StringArray* words)
                 PRINT_ERROR("fork failed");
             }
         }
-        start = end + 1;
+        start = end;
     }
     return 0;
 }
